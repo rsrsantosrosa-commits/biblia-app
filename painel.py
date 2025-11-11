@@ -85,7 +85,8 @@ if termo:
     # ------- HEATMAP -------
     st.write("## 🔥 Mapa de Calor")
     img = gerar_heatmap(tabela, termo)
-    st.image(img, use_container_width=True)
+    st.pyplot(img, use_container_width=True)
+
 
     # ------- LISTA DE VERSÍCULOS -------
     st.write("## 📜 Versículos encontrados")
@@ -97,4 +98,5 @@ if termo:
                 for ab, c, v, texto in ocorrencias:
                     livro = MAPA_LIVROS.get(ab, ab.upper())
                     st.write(f"**{livro} {c}:{v}** — {highlight(texto, termo)}")
+
 
