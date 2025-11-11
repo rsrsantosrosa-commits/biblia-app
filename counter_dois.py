@@ -6,26 +6,23 @@ from collections import defaultdict
 from io import BytesIO
 
 import pandas as pd
-import matplotlib.pyplot as plt
+
 
 # =============================
-# NORMALIZAÇÃO DE TEXTO
+# Normalização de texto
 # =============================
 def normalizar(texto: str) -> str:
+    """Remove acentos/diacríticos e coloca em minúsculas."""
     if not isinstance(texto, str):
         return ""
-    # Remove acentos, mantém só “base character” e baixa tudo
     texto = unicodedata.normalize("NFD", texto)
     texto = "".join(ch for ch in texto if unicodedata.category(ch) != "Mn")
     return texto.lower()
 
-# Para modo EXATO: tokeniza a string normalizada em “palavras” (\w = letras/dígitos/_ em Unicode)
-_WORD_RE = re.compile(r"\w+", re.UNICODE)
-def tokenizar(texto: str):
-    return _WORD_RE.findall(normalizar(texto))
 
 # =============================
-# ARQUIVOS DAS BÍBLIAS
+# Arquivos das Bíblias
+# (mantenha estes nomes no mesmo diretório do app)
 # =============================
 VERSOES = {
     "ACF": "acf.json",
@@ -35,8 +32,9 @@ VERSOES = {
     "Hebraico": "hebrew.json",
 }
 
+
 # =============================
-# MAPA BÍBLICO COMPLETO (PT)
+# Mapa bíblico (abreviação -> nome)
 # =============================
 MAPA_LIVROS = {
     "gn": "Gênesis", "ex": "Êxodo", "lv": "Levítico", "nm": "Números", "dt": "Deuteronômio",
@@ -54,10 +52,13 @@ MAPA_LIVROS = {
     "tg": "Tiago", "1pe": "1 Pedro", "2pe": "2 Pedro", "1jo": "1 João", "2jo": "2 João",
     "3jo": "3 João", "jd": "Judas", "ap": "Apocalipse",
 }
+# ordem canônica para reindex
 ORDEM = list(MAPA_LIVROS.keys())
 
+
 # =============================
-# MAPA: NOME DO LIVRO HEBRAICO → ABREV PT
+# Mapeamento: livro em hebraico -> abreviação PT
+# (para alinhar com ORDEM/MAPA_LIVROS)
 # =============================
 MAPA_HEB_ABREV = {
     "בראשית": "gn", "שמות": "ex", "ויקרא": "lv", "במדבר": "nm", "דברים": "dt",
@@ -70,35 +71,43 @@ MAPA_HEB_ABREV = {
     "חבקוק": "hc", "צפניה": "sf", "חגי": "ag", "זכריה": "zc", "מלאכי": "ml",
 }
 
-# =============================
-# NÚMEROS HEBRAICOS SIMPLES (capítulos)
-# =============================
-HEB_NUM = {
-    "א": 1, "ב": 2, "ג": 3, "ד": 4, "ה": 5, "ו": 6, "ז": 7, "ח": 8, "ט": 9,
-    "י": 10, "כ": 20, "ל": 30, "מ": 40, "נ": 50, "ס": 60, "ע": 70, "פ": 80, "צ": 90,
-    "ק": 100, "ר": 200, "ש": 300, "ת": 400,
-}
-def hebraico_para_num(s: str) -> int:
-    # Ex.: "יא" = 10 + 1 = 11
-    total = 0
-    for ch in str(s):
-        total += HEB_NUM.get(ch, 0)
-    return total if total > 0 else 0
 
 # =============================
-# CARREGAMENTO
+# Conversão de “número” hebraico para inteiro (capítulos)
+# Aceita strings como י״א, ט״ו, יג, etc.
+# =============================
+HEB_NUM_VAL = {
+    "א":1,"ב":2,"ג":3,"ד":4,"ה":5,"ו":6,"ז":7,"ח":8,"ט":9,"י":10,
+    "כ":20,"ל":30,"מ":40,"נ":50,"ס":60,"ע":70,"פ":80,"צ":90,
+    "ק":100,"ר":200,"ש":300,"ת":400,
+}
+HEB_NUM_CLEAN_RE = re.compile(r"[^אבגדהוזחטיכלמנסעפצקרשת]")
+
+def hebraico_para_num(s: str) -> int:
+    if not isinstance(s, str):
+        return 0
+    s = HEB_NUM_CLEAN_RE.sub("", s)  # remove geresh/gershayim e outros sinais
+    total = 0
+    for ch in s:
+        total += HEB_NUM_VAL.get(ch, 0)
+    return max(total, 0)
+
+
+# =============================
+# I/O
 # =============================
 def carregar_versao(path: str):
     with open(path, encoding="utf-8-sig") as f:
         return json.load(f)
 
+
 # =============================
-# AJUSTE DA ESTRUTURA HEBRAICA
-# esperado: lista de dicts {"book": <he>, "chapter": <he>, "verse": <he>, "content": <str>}
-# vira: [{"abbrev": "gn", "chapters": [[v1, v2, ...], [..], ...]}]
+# Ajuste estrutura do hebraico
+# Entrada esperada: lista de dicts com keys: book, chapter, verse, content
+# Saída: [{"abbrev": "...", "chapters": [[v1,v2,...],[...], ...]}]
 # =============================
-def converter_hebraico(versos):
-    livros = defaultdict(lambda: defaultdict(list))
+def converter_hebraico(versos: list) -> list:
+    livros = defaultdict(lambda: defaultdict(list))  # {abrev: {cap: [versos...]}}
     for v in versos:
         abrev = MAPA_HEB_ABREV.get(v.get("book", ""), None)
         if not abrev:
@@ -110,117 +119,150 @@ def converter_hebraico(versos):
 
     resultado = []
     for abrev, caps in livros.items():
-        # ordena capítulos numericamente
+        # capítulos em ordem crescente, cada um como lista de versos
         ordered = [caps[c] for c in sorted(caps)]
         resultado.append({"abbrev": abrev, "chapters": ordered})
     return resultado
 
-# =============================
-# CONTAGEM (agora com modo "substring" OU "exato")
-# =============================
-def contar_por_livro(biblia, termo: str, modo: str = "substring"):
-    termo_n = normalizar(termo)
-    contagem = {}
 
+# =============================
+# Contagem por livro
+# modo = "substring" | "exato"
+# =============================
+def _count_in_text(text_norm: str, term_norm: str, modo: str) -> int:
+    if not term_norm:
+        return 0
+    if modo == "exato":
+        # borda de palavra: sem letras/nums/underscore antes/depois
+        pat = re.compile(rf"(?<!\w){re.escape(term_norm)}(?!\w)")
+        return len(pat.findall(text_norm))
+    # substring (contém)
+    return text_norm.count(term_norm)
+
+
+def contar_por_livro(biblia: list, termo: str, modo: str = "substring") -> dict:
+    term_norm = normalizar(termo)
+    contagem = {}
     for livro in biblia:
         total = 0
         for cap in livro["chapters"]:
             for vers in cap:
-                if modo == "exato":
-                    toks = tokenizar(vers)
-                    total += sum(1 for t in toks if t == termo_n)
-                else:  # "substring"
-                    total += normalizar(vers).count(termo_n)
-        contagem[livro["abbrev"]] = total
-
+                total += _count_in_text(normalizar(vers), term_norm, modo)
+        contagem[livro["abbrev"]] = int(total)
     return contagem
 
-# =============================
-# LISTAR VERSÍCULOS (com modo)
-# =============================
-def listar_ocorrencias(biblia, termo: str, modo: str = "substring"):
-    termo_n = normalizar(termo)
-    resultados = []
 
+# =============================
+# Listar ocorrências (para mostrar os versículos)
+# =============================
+def listar_ocorrencias(biblia: list, termo: str, modo: str = "substring"):
+    term_norm = normalizar(termo)
+    resultados = []
     for livro in biblia:
         abrev = livro["abbrev"]
         for c_idx, cap in enumerate(livro["chapters"], start=1):
             for v_idx, vers in enumerate(cap, start=1):
-                if modo == "exato":
-                    toks = tokenizar(vers)
-                    if termo_n in toks:
-                        resultados.append((abrev, c_idx, v_idx, vers))
-                else:  # "substring"
-                    if termo_n in normalizar(vers):
-                        resultados.append((abrev, c_idx, v_idx, vers))
-
+                if _count_in_text(normalizar(vers), term_norm, modo) > 0:
+                    resultados.append((abrev, c_idx, v_idx, vers))
     return resultados
 
-# =============================
-# HEATMAP (importa seaborn apenas aqui)
-# =============================
-def gerar_heatmap(df: pd.DataFrame, termo: str) -> BytesIO:
-    # Import “preguiçoso” para evitar conflitos locais
-    import seaborn as sns
 
-    fig, ax = plt.subplots(figsize=(10, max(6, len(df) * 0.18)))
-    sns.heatmap(df, annot=False, linewidths=0.3, ax=ax)
-    ax.set_title(f"Mapa de calor — '{termo}'", pad=12)
+# =============================
+# Heatmap (matplotlib puro, sem seaborn)
+# =============================
+def gerar_heatmap(tabela: pd.DataFrame, termo: str) -> BytesIO:
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # garante numérico
+    df = tabela.copy()
+    df = df.apply(pd.to_numeric, errors="coerce").fillna(0)
+
+    # caso extremo: df vazio
+    if df.empty:
+        fig, ax = plt.subplots(figsize=(6, 2))
+        ax.text(0.5, 0.5, "Sem dados para exibir", ha="center", va="center")
+        ax.axis("off")
+        buf = BytesIO()
+        fig.savefig(buf, format="png", bbox_inches="tight", dpi=200)
+        plt.close(fig)
+        buf.seek(0)
+        return buf
+
+    data = df.values.astype(float)
+    fig_h = max(6, 0.25 * df.shape[0] + 2)
+    fig_w = max(6, 1.0 * df.shape[1] + 2)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    im = ax.imshow(data, aspect="auto")
+
+    ax.set_xticks(np.arange(df.shape[1]))
+    ax.set_xticklabels(df.columns)
+    ax.set_yticks(np.arange(df.shape[0]))
+    ax.set_yticklabels(df.index)
+
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+    ax.set_title(f"Ocorrências de “{termo}” por livro/versão")
+    fig.colorbar(im, ax=ax)
     fig.tight_layout()
+
     buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=200)
     plt.close(fig)
     buf.seek(0)
     return buf
 
+
 # =============================
-# CARREGA TODAS AS VERSÕES AQUI (usado pelo painel)
+# Loader das bíblias (para importar no painel)
 # =============================
-def _carregar_todas():
-    biblias_locais = {}
+def build_biblias() -> dict:
+    result = {}
     for nome, path in VERSOES.items():
         data = carregar_versao(path)
         if nome == "Hebraico":
             data = converter_hebraico(data)
-        biblias_locais[nome] = data
-    return biblias_locais
+        result[nome] = data
+    return result
 
-biblias = _carregar_todas()
+
+# objeto pronto para import no painel
+biblias = build_biblias()
+
 
 # =============================
-# CLI opcional
+# CLI opcional (terminal)
 # =============================
-if __name__ == "__main__":
-    print("Versões carregadas:", list(biblias.keys()))
+def _main_cli():
+    print("Buscador Bíblico — modos: substring | exato")
     while True:
         termo = input("\nDigite a palavra/frase (ou 'sair'): ").strip()
         if termo.lower() == "sair":
             break
-        modo = input("Modo ('substring' ou 'exato'): ").strip().lower() or "substring"
+        modo = input("Modo (substring/exato) [substring]: ").strip().lower() or "substring"
 
         tabela = pd.DataFrame({
             nome: contar_por_livro(biblia, termo, modo)
             for nome, biblia in biblias.items()
         })
-        # Ordena pela ordem bíblica; para abreviações desconhecidas, mantém como vier
+        # reindex na ordem canônica e traduz índice para nome completo
         tabela = tabela.reindex(ORDEM)
         tabela.index = [MAPA_LIVROS.get(ab, ab.upper()) for ab in tabela.index]
         tabela = tabela.fillna(0).astype(int)
 
         print("\nRESULTADO:\n")
         print(tabela.to_string())
-
         print("\nTOTAL GERAL:\n")
         print(tabela.sum())
 
-        ver = input("Listar versículos? (s/n): ").strip().lower()
-        if ver == "s":
-            for nome, biblia in biblias.items():
-                oc = listar_ocorrencias(biblia, termo, modo)
-                if not oc:
-                    continue
-                print(f"\n--- {nome} ({len(oc)}) ---")
-                for ab, c, v, texto in oc:
-                    livro = MAPA_LIVROS.get(ab, ab.upper())
-                    print(f"{livro} {c}:{v} — {texto}")
-        print()
+        # exporta opcional
+        try:
+            arquivo = f"resultado_{normalizar(termo).replace(' ', '_')}_{modo}.xlsx"
+            tabela.to_excel(arquivo)
+            print(f"\n📄 Resultado salvo em: {arquivo}\n")
+        except Exception as e:
+            print(f"(Aviso) Não foi possível salvar o Excel: {e}")
+
+
+if __name__ == "__main__":
+    _main_cli()
