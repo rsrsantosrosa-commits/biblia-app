@@ -170,47 +170,43 @@ def listar_ocorrencias(biblia: list, termo: str, modo: str = "substring"):
 # =============================
 # Heatmap (matplotlib puro, sem seaborn)
 # =============================
-def gerar_heatmap(tabela: pd.DataFrame, termo: str) -> BytesIO:
+def gerar_heatmap(tabela, termo):
     import matplotlib.pyplot as plt
-    import numpy as np
+    import seaborn as sns
 
-    # garante numérico
-    df = tabela.copy()
-    df = df.apply(pd.to_numeric, errors="coerce").fillna(0)
+    # Garantir inteiros para anotar com "d"
+    df = tabela.copy().fillna(0).astype(int)
 
-    # caso extremo: df vazio
-    if df.empty:
-        fig, ax = plt.subplots(figsize=(6, 2))
-        ax.text(0.5, 0.5, "Sem dados para exibir", ha="center", va="center")
-        ax.axis("off")
-        buf = BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight", dpi=200)
-        plt.close(fig)
-        buf.seek(0)
-        return buf
+    vmax = int(df.to_numpy().max()) if df.size else 0
 
-    data = df.values.astype(float)
-    fig_h = max(6, 0.25 * df.shape[0] + 2)
-    fig_w = max(6, 1.0 * df.shape[1] + 2)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    im = ax.imshow(data, aspect="auto")
+    # Altura dinâmica: 0.28 por linha (mín 8) p/ caber os rótulos
+    altura = max(8, len(df) * 0.28)
+    fig, ax = plt.subplots(figsize=(11, altura))
 
-    ax.set_xticks(np.arange(df.shape[1]))
-    ax.set_xticklabels(df.columns)
-    ax.set_yticks(np.arange(df.shape[0]))
-    ax.set_yticklabels(df.index)
+    sns.heatmap(
+        df,
+        annot=True,           # <- mostra os números nas células
+        fmt="d",              # <- como inteiro
+        cmap="YlOrRd",        # <- paleta estável e “quente”
+        linewidths=0.5,
+        linecolor="#eeeeee",
+        cbar=True,
+        vmin=0,
+        vmax=vmax,
+        ax=ax
+    )
 
-    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    ax.set_title(f"Ocorrências de “{termo}” por livro e versão", pad=12)
+    ax.set_xlabel("Versões")
+    ax.set_ylabel("Livros")
 
-    ax.set_title(f"Ocorrências de “{termo}” por livro/versão")
-    fig.colorbar(im, ax=ax)
+    # Deixar os rótulos menores para não poluir
+    ax.tick_params(axis="x", labelrotation=0)
+    ax.tick_params(axis="y", labelsize=8)
+
     fig.tight_layout()
+    return fig
 
-    buf = BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", dpi=200)
-    plt.close(fig)
-    buf.seek(0)
-    return buf
 
 
 # =============================
@@ -266,3 +262,4 @@ def _main_cli():
 
 if __name__ == "__main__":
     _main_cli()
+
